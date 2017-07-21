@@ -1,0 +1,9 @@
+*.obj
+*.lib
+*.a
+*.so
+*.ppm
+*.exe
+*.DS_Store
+/build
+/out
