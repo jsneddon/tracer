@@ -18,31 +18,36 @@
 #include "pointlight.h"
 
 std::vector<Geometry *> Scene;
+std::vector<Geometry *> Lights;
 
 void SetupScene()
 {
 
 
-    Scene.push_back(new Sphere(1e3f, Vector3(-1e3f + 1,40.8,81.6), Vector3(.75f, .25f, .25f), Geometry::DIFFUSE));//Rght
+	Scene.push_back(new Sphere(1e3f, Vector3(-1e3f + 1,40.8,81.6), Vector3(.75f, .25f, .25f), Geometry::DIFFUSE));//Rght
 
-    Scene.push_back(new Sphere(1e3f, Vector3(1e3f + 120, 40.8f, 81.6f), Vector3(.25f, .75f, .25f), Geometry::DIFFUSE));//lft
+	Scene.push_back(new Sphere(1e3f, Vector3(1e3f + 120, 40.8f, 81.6f), Vector3(.25f, .75f, .25f), Geometry::DIFFUSE));//lft
 
-     Scene.push_back(new Sphere(1e3f, Vector3(50.f, 40.8f, 1e3f), Vector3(.25f, .25f, .75f),Geometry::DIFFUSE));//Back
-    Scene.push_back(new Sphere(1e3f, Vector3(50.f, 40.8f, -1e3f + 170.f), Vector3(.25f, .25f, .25f), Geometry::DIFFUSE));//Frnt
+	Scene.push_back(new Sphere(1e3f, Vector3(50.f, 40.8f, 1e3f), Vector3(.25f, .25f, .75f),Geometry::DIFFUSE));//Back
+	Scene.push_back(new Sphere(1e3f, Vector3(50.f, 40.8f, -1e3f + 170.f), Vector3(.25f, .25f, .25f), Geometry::DIFFUSE));//Frnt
    
-     Scene.push_back(new Sphere(1e3f, Vector3(50.f, -1e3f, 81.6f), Vector3(.25f, .25f, .25f), Geometry::DIFFUSE));//Botm
-    Scene.push_back(new Sphere(1e3f, Vector3(50.f, 1e3f + 91.6f, 81.6f), Vector3(.75f, .75f, .25f), Geometry::DIFFUSE));//Top
+	Scene.push_back(new Sphere(1e3f, Vector3(50.f, -1e3f, 81.6f), Vector3(.25f, .25f, .25f), Geometry::DIFFUSE));//Botm
+	Scene.push_back(new Sphere(1e3f, Vector3(50.f, 1e3f + 91.6f, 81.6f), Vector3(.75f, .75f, .25f), Geometry::DIFFUSE));//Top
     
-    Scene.push_back(new Sphere(16.5f, Vector3(27.f, 16.5f, 47.f), Vector3(.25f, .75f, .75f), Geometry::SPECULAR));//Mirr
-    Scene.push_back(new Sphere(16.5f, Vector3(73.f, 16.5f, 78.f), Vector3(.75f, .75f, .75f), Geometry::DIFFUSE));//Mirr
-    
-    Scene.push_back(new PointLight(Vector3(60.f, 185.0f, 86.6f), Vector3(1.0f, 1.0f, 1.0f), Geometry::SPECULAR));
-    
+	Scene.push_back(new Sphere(16.5f, Vector3(27.f, 16.5f, 47.f), Vector3(.25f, .75f, .75f), Geometry::SPECULAR));//Mirr
+	Scene.push_back(new Sphere(16.5f, Vector3(73.f, 16.5f, 78.f), Vector3(.75f, .75f, .75f), Geometry::DIFFUSE));//Mirr
+	
+	PointLight * p= new PointLight(Vector3(60.f, 80.0f, 86.6f), Vector3(1.0f, 1.0f, 1.0f), Geometry::SPECULAR);
 
+
+	Scene.push_back(p);
+	Lights.push_back(p);
 }
 
+
+
 //ray vs all objects
-inline bool Intersect(const Ray &r, float &t, int &id)
+inline bool Intersect(const Ray &r, float &t, int &id, int ignore=-1)
 {
     //find the closest intersection that is not self
     float d;
@@ -51,6 +56,9 @@ inline bool Intersect(const Ray &r, float &t, int &id)
     int arraySize = Scene.size() - 1;
     for (int i = arraySize; i >= 0; i--)
     {
+		if (ignore == i)
+			continue;
+
         d = Scene[i]->intersect(r);
         if (d>0 && d < t)
         {
@@ -61,6 +69,47 @@ inline bool Intersect(const Ray &r, float &t, int &id)
     return t<inf;
 }
 
+inline bool IntersectQuick(const Ray &r, float &t, int &id, int ignore = -1, int ignore2 = -1)
+{
+	//find the closest intersection that is not self
+	float d;
+	float inf = t = 1e20f;
+
+	int arraySize = Scene.size() - 1;
+	for (int i = arraySize; i >= 0; i--)
+	{
+		if (ignore == i)
+			continue;
+		if (ignore2 == i)
+			continue;
+
+		d = Scene[i]->intersect(r);
+		if (d>0 && d < t)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+inline bool PointIsInDirectLight(const Vector3 &p,int _id)
+{
+	int arraySize = Lights.size();
+	for (int i = 0; i < arraySize; ++i)
+	{
+		Vector3 dir = Lights[i]->position-p;
+		dir.Normalise();
+		Ray r(p, dir);
+		float t=0.0f;
+		int id=0;
+		if (IntersectQuick(r, t, id,_id,8))
+		{
+			return false;
+		}
+
+	}
+	return true;
+}
 
 inline float randFloat()
 {
@@ -104,7 +153,7 @@ inline void Diffuse(
     out = (u*cos(r1)*r2s + v*sin(r1)*r2s + w*sqrtf(1 - r2)).Normalise();
 }
 
-Vector3 Radiance(const Ray &r, int depth)
+Vector3 Radiance(const Ray &r, int depth,int bounces=3)
 {
     Vector3 out;
     
@@ -117,13 +166,28 @@ Vector3 Radiance(const Ray &r, int depth)
     
     //break recursion at max bounce
     ++depth;
-    if (depth > 4)
+    if (depth > bounces || obj->emmission.x > 1.0f )
         return obj->emmission;
     
     Vector3 color = obj->color;
     
     Vector3 x = r.origin + r.direction*t;
     
+	/*
+	//too slow
+	//direct line to light does exists
+	// you are in some from of shadow
+	if ( PointIsInDirectLight(x,id)==false )
+	{
+		//return Vector3();
+
+	}
+	else
+	{
+		bounces=1;
+	}
+	*/
+
     //this assumes sphere
     Vector3	n = obj->GetNormalAtPoint(x);
     
@@ -133,13 +197,22 @@ Vector3 Radiance(const Ray &r, int depth)
     
     if (obj->material == Geometry::DIFFUSE)
         Diffuse(reflected, r.direction, normal);//,1.3);
-    if (obj->material == Geometry::SPECULAR)
-        Reflect(reflected, r.direction, normal);//,1.3);
+	if (obj->material == Geometry::SPECULAR)
+	{
+		Reflect(reflected, r.direction, normal);//,1.3);
+		++bounces;
+		if (bounces > 4)
+			bounces = 4;
+	}
     if (obj->material == Geometry::GLASS)
         Refract(reflected, r.direction, normal, 0.0f);//,1.3);
     
+	//exit occasionally 
+	if (rand() % 10 == 0)
+		return obj->emmission;
+
     Ray reflect = Ray(x, reflected);
-    Vector3 nextBounce = Radiance(reflect, depth);
+    Vector3 nextBounce = Radiance(reflect, depth, bounces);
     out = obj->emmission + color.Multiply(nextBounce);
     
     
@@ -149,15 +222,15 @@ Vector3 Radiance(const Ray &r, int depth)
 int main(int argc, char *argv[])
 {
     
-    if (argc < 4)
+    if (argc < 5)
     {
-        fprintf(stdout,"usage: Tracer width height samples\n");
+        fprintf(stdout,"usage: Tracer width height samples bounces\n");
         return 1;
     }
     
     SetupScene();
     
-    int w = atoi(argv[1]), h = atoi(argv[2]), samps = atoi(argv[3]);
+    int w = atoi(argv[1]), h = atoi(argv[2]), samps = atoi(argv[3]),bounces=atoi(argv[4]);
     
     fprintf(stdout, "%i %i %i",w,h,samps);
     
@@ -169,48 +242,59 @@ int main(int argc, char *argv[])
     
     Vector3 cx = Vector3(w*.5135f / h);
     Vector3 cy = (cx.CrossProduct(cam.direction)).Normalise()*.5135f;
-    
-    for (int y = 0; y < h; y++) //rows
-    {
-        
-        fprintf(stderr, "\r %d/%d",y,h);
-        
-        for (int x = 0; x < w; x++)
-        {
-            for (int sy = 0; sy < 2; sy++)
-            {
-                for (int sx = 0; sx < 2; sx++)
-                {
-                    color = Vector3();
-                    for (int s = 0; s < samps; s++)
-                    {
-                        float r1 = 2 * randFloat();
-                        float dx = r1 < 1 ? sqrtf(r1) - 1 : 1 - sqrtf(2 - r1);
-                        
-                        float r2 = 2 * randFloat();
-                        float dy = r2 < 1 ? sqrtf(r2) - 1 : 1 - sqrtf(2 - r2);
-                        
-                        
-                        Vector3 d = cx*(((sx + .5f + dx) / 2.f + x) / w - .5f) +
-                        cy*(((sy + .5f + dy) / 2 + y) / h - .5f) + cam.direction;
-                        
-                        color = color + Radiance(Ray(cam.origin + d * 140.f, d.Normalise()), 0)*(1.f / samps);
-                        
-                    }
-                    int index = (h - y - 1)*w + x;
-                    pixels[index].x = color.x;
-                    pixels[index].y = color.y;
-                    pixels[index].z = color.z;
-                }
-                
-                
-            }
-        }
-    }
+
+
+	
+	#pragma omp parallel for schedule(dynamic, 1) private(color)
+	for (int y = 0; y < h; y++) //rows
+	{
+	//	int p = (hits * 100) / (hits+misses+1);
+		/// (hits + misses + 1);
+		if(y%10==0)
+			fprintf(stderr, "\r %d/%d", y, h);
+
+		for (int x = 0; x < w; x++)
+		{
+			for (int sy = 0; sy < 2; sy++)
+			{
+				for (int sx = 0; sx < 2; sx++)
+				{
+					color = Vector3();
+					for (int s = 0; s < samps; s++)
+					{
+						float r1 = 2 * randFloat();
+						float dx = r1 < 1 ? sqrtf(r1) - 1 : 1 - sqrtf(2 - r1);
+
+						float r2 = 2 * randFloat();
+						float dy = r2 < 1 ? sqrtf(r2) - 1 : 1 - sqrtf(2 - r2);
+
+
+						Vector3 d = cx*(((sx + .5f + dx) / 2.f + x) / w - .5f) +
+							cy*(((sy + .5f + dy) / 2 + y) / h - .5f) + cam.direction;
+						Vector3 col = Radiance(Ray(cam.origin + d * 140.f, d.Normalise()), 0, bounces)*(1.f / samps);
+				
+
+						color = color + col;
+
+					}
+					int index = (h - y - 1)*w + x;
+					pixels[index].x = color.x;
+					pixels[index].y = color.y;
+					pixels[index].z = color.z;
+				}
+
+
+			}
+		}
+	}
+
+
     
     //write out image.
+	char file[32];
+	sprintf(file, "image_w%i_h%i_s%i_b%i.ppm", w, h, samps,bounces);
     FILE *f;
-    f = fopen( "image.ppm", "w");
+    f = fopen( file, "w");
      
     if (f == 0)
     {
