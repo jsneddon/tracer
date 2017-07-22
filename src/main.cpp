@@ -10,38 +10,25 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctime>
+#include <time.h>
 #include <iostream>
 
 #include "vector3.h"
 #include "ray.h"
 #include "sphere.h"
 #include "pointlight.h"
+#include "plane.h"
+#include "sceneloader.h"
+
+
 
 std::vector<Geometry *> Scene;
 std::vector<Geometry *> Lights;
 
 void SetupScene()
 {
-
-
-	Scene.push_back(new Sphere(1e3f, Vector3(-1e3f + 1,40.8,81.6), Vector3(.75f, .25f, .25f), Geometry::DIFFUSE));//Rght
-
-	Scene.push_back(new Sphere(1e3f, Vector3(1e3f + 120, 40.8f, 81.6f), Vector3(.25f, .75f, .25f), Geometry::DIFFUSE));//lft
-
-	Scene.push_back(new Sphere(1e3f, Vector3(50.f, 40.8f, 1e3f), Vector3(.25f, .25f, .75f),Geometry::DIFFUSE));//Back
-	Scene.push_back(new Sphere(1e3f, Vector3(50.f, 40.8f, -1e3f + 170.f), Vector3(.25f, .25f, .25f), Geometry::DIFFUSE));//Frnt
-   
-	Scene.push_back(new Sphere(1e3f, Vector3(50.f, -1e3f, 81.6f), Vector3(.25f, .25f, .25f), Geometry::DIFFUSE));//Botm
-	Scene.push_back(new Sphere(1e3f, Vector3(50.f, 1e3f + 91.6f, 81.6f), Vector3(.75f, .75f, .25f), Geometry::DIFFUSE));//Top
-    
-	Scene.push_back(new Sphere(16.5f, Vector3(27.f, 16.5f, 47.f), Vector3(.25f, .75f, .75f), Geometry::SPECULAR));//Mirr
-	Scene.push_back(new Sphere(16.5f, Vector3(73.f, 16.5f, 78.f), Vector3(.75f, .75f, .75f), Geometry::DIFFUSE));//Mirr
-	
-	PointLight * p= new PointLight(Vector3(60.f, 80.0f, 86.6f), Vector3(1.0f, 1.0f, 1.0f), Geometry::SPECULAR);
-
-
-	Scene.push_back(p);
-	Lights.push_back(p);
+	SceneLoader l;
+	l.Load("scene1.txt", Scene, Lights);
 }
 
 
@@ -49,7 +36,6 @@ void SetupScene()
 //ray vs all objects
 inline bool Intersect(const Ray &r, float &t, int &id, int ignore=-1)
 {
-    //find the closest intersection that is not self
     float d;
     float inf = t = 1e20f;
     
@@ -83,8 +69,7 @@ inline bool IntersectQuick(const Ray &r, float &t, int &id, int ignore = -1, int
 		if (ignore2 == i)
 			continue;
 
-		d = Scene[i]->intersect(r);
-		if (d>0 && d < t)
+		if (Scene[i]->fastintersect(r) == true)
 		{
 			return true;
 		}
@@ -153,6 +138,102 @@ inline void Diffuse(
     out = (u*cos(r1)*r2s + v*sin(r1)*r2s + w*sqrtf(1 - r2)).Normalise();
 }
 
+float clamp(float in, float min, float max)
+{
+	if (in > max)
+		in = max;
+	if (in , min)
+		in = min;
+
+	return in;
+}
+// returns intensity of diffuse reflection
+float diffuseLighting(Vector3 N, Vector3 L)
+{
+	// calculation as for Lambertian reflection
+	float diffuseTerm = clamp(N.DotProduct( L) , 0, 1);
+	return diffuseTerm;
+}
+
+// returns intensity of specular reflection
+float specularLighting(Vector3 N, Vector3 L, Vector3 V)
+{
+	float specularTerm = 0;
+
+	// calculate specular reflection only if
+	// the surface is oriented to the light source
+	if (N.DotProduct( L) > 0)
+	{
+		// half vector
+		Vector3 H = (L + V).Normalise();
+		specularTerm = pow(N.DotProduct( H), 20.0f);
+	}
+	return specularTerm;
+}
+
+Vector3 Phong(const Geometry *obj,Vector3 o_toLight, Vector3 o_toCamera, Vector3 o_normal)
+{
+	// normalize vectors after interpolation
+	Vector3 L = o_toLight.Normalise();
+	Vector3 V = o_toCamera.Normalise();
+	Vector3 N = o_normal;
+
+	// get Blinn-Phong reflectance components
+	float Iamb = 0.0f;
+	float Idif = diffuseLighting(N, L);
+	float Ispe = specularLighting(N, L, V);
+
+	// diffuse color of the object from texture
+	//Vector3 diffuseColor = texture(u_diffuseTexture, o_texcoords).rgb;
+
+	// combination of all components and diffuse color of the object
+	Vector3 result =  obj->color * Idif + obj->color*Ispe;
+
+	return result;
+}
+
+
+inline Vector3 Phong(const Geometry *obj, const Ray &ray,Vector3 hit, Vector3 &normal)
+{
+	Vector3 color;
+	int arraySize = Lights.size();
+	for (int i = 0; i < arraySize; ++i)
+	{
+		
+		Vector3 toLight = Lights[i]->position- hit;
+		Vector3 toCam = ray.origin - hit;
+
+		//diffuse
+		float distToLight = toLight.Length();
+		//toLight.Normalise();
+		if (distToLight > 0.0f)
+			toLight = toLight / distToLight;
+
+		float NDotL = toLight.DotProduct(normal);
+		Vector3 diff = obj->color * NDotL;
+
+		//spec
+		toCam.Normalise();
+		Vector3 Halfway = (toLight + toCam).Normalise();
+
+		float NDotH = Halfway.DotProduct(normal);
+		Vector3 spec = obj->color * powf(NDotH,20.0f);
+
+		clamp(distToLight, 0, 200.0f);
+		float delta = 200 - distToLight;
+		delta /= 200.0f;
+
+		delta = delta*delta*delta;
+		float attenuation = delta;
+
+		color = color + ((diff + spec)*attenuation);
+		//) * attenuation);
+		//color = color + Phong(obj, toLight, toCam, normal);
+		
+	}
+	return color*1/ arraySize;
+}
+
 Vector3 Radiance(const Ray &r, int depth,int bounces=3)
 {
     Vector3 out;
@@ -164,7 +245,7 @@ Vector3 Radiance(const Ray &r, int depth,int bounces=3)
     
     const Geometry *obj = Scene[id];
     
-    //break recursion at max bounce
+    //break recursion at max bounce or hit light
     ++depth;
     if (depth > bounces || obj->emmission.x > 1.0f )
         return obj->emmission;
@@ -173,20 +254,21 @@ Vector3 Radiance(const Ray &r, int depth,int bounces=3)
     
     Vector3 x = r.origin + r.direction*t;
     
-	/*
+	
 	//too slow
 	//direct line to light does exists
 	// you are in some from of shadow
-	if ( PointIsInDirectLight(x,id)==false )
+	/*
+	if ( PointIsInDirectLight(x,id) == false )
 	{
 		//return Vector3();
-
 	}
 	else
 	{
-		bounces=1;
+		bounces = 1;
 	}
 	*/
+	
 
     //this assumes sphere
     Vector3	n = obj->GetNormalAtPoint(x);
@@ -198,18 +280,17 @@ Vector3 Radiance(const Ray &r, int depth,int bounces=3)
     if (obj->material == Geometry::DIFFUSE)
         Diffuse(reflected, r.direction, normal);//,1.3);
 	if (obj->material == Geometry::SPECULAR)
-	{
 		Reflect(reflected, r.direction, normal);//,1.3);
-		++bounces;
-		if (bounces > 4)
-			bounces = 4;
-	}
     if (obj->material == Geometry::GLASS)
         Refract(reflected, r.direction, normal, 0.0f);//,1.3);
-    
-	//exit occasionally 
-	if (rand() % 10 == 0)
-		return obj->emmission;
+	if (obj->material == Geometry::FLAT)
+		return obj->color;
+	if (obj->material == Geometry::PHONG)
+		return Phong(obj, r, x, normal);
+
+	//exit occasionally (80% of rays are a miss anyway)
+	//if (rand() % 2 == 0)
+		//return obj->emmission;
 
     Ray reflect = Ray(x, reflected);
     Vector3 nextBounce = Radiance(reflect, depth, bounces);
@@ -227,6 +308,12 @@ int main(int argc, char *argv[])
         fprintf(stdout,"usage: Tracer width height samples bounces\n");
         return 1;
     }
+
+	//timing info
+	time_t start_t, end_t;
+	double diff_t;
+	time(&start_t);
+	
     
     SetupScene();
     
@@ -289,7 +376,9 @@ int main(int argc, char *argv[])
 	}
 
 
-    
+	time(&end_t);
+	diff_t = difftime(end_t, start_t);
+
     //write out image.
 	char file[32];
 	sprintf(file, "image_w%i_h%i_s%i_b%i.ppm", w, h, samps,bounces);
@@ -298,7 +387,7 @@ int main(int argc, char *argv[])
      
     if (f == 0)
     {
-        fprintf(stderr, "Cannot open file %s","image.ppm");
+        fprintf(stderr, "Cannot open file %s",file);
     }
     else
     {
@@ -310,6 +399,17 @@ int main(int argc, char *argv[])
     }
     
     fclose(f);
-    
+
+	f = fopen("stats.txt", "a");
+	if (f == 0)
+	{
+		fprintf(stderr, "Cannot open file %s", "stats.txt");
+	}
+	else
+	{
+		fprintf(f, "\n%s w:%d h:%d s:%d b:%d t:%f", file, w, h, samps, bounces, diff_t);
+	}
+	fclose(f);
+
     return 0;
 }

@@ -25,6 +25,8 @@ public:
     Vector3 GetDirection(Vector3 &HitPoint) ;
     
     float intersect(const Ray &r) const;
-    
+
+	bool fastintersect(const Ray &r) const;
+
     Vector3 GetNormalAtPoint(Vector3 point) const;
 };

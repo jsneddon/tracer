@@ -32,8 +32,11 @@ add_subdirectory (math)
 include_directories ("${PROJECT_SOURCE_DIR}/geometry")
 add_subdirectory (geometry)
 
+include_directories ("${PROJECT_SOURCE_DIR}/utils")
+add_subdirectory (utils)
+
 add_executable(Tracer main.cpp)
-target_link_libraries (Tracer math geometry)
+target_link_libraries (Tracer math geometry utils)
 
 install (TARGETS Tracer DESTINATION bin)
 install (FILES "${PROJECT_BINARY_DIR}/TracerConfig.h"
